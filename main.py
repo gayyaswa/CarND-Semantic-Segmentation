@@ -6,9 +6,9 @@ import warnings
 from distutils.version import LooseVersion
 import project_tests as tests
 
-
 # Check TensorFlow Version
-assert LooseVersion(tf.__version__) >= LooseVersion('1.0'), 'Please use TensorFlow version 1.0 or newer.  You are using {}'.format(tf.__version__)
+assert LooseVersion(tf.__version__) >= LooseVersion(
+    '1.0'), 'Please use TensorFlow version 1.0 or newer.  You are using {}'.format(tf.__version__)
 print('TensorFlow Version: {}'.format(tf.__version__))
 
 # Check for a GPU
@@ -26,26 +26,25 @@ def load_vgg(sess, vgg_path):
     :return: Tuple of Tensors from VGG model (image_input, keep_prob, layer3_out, layer4_out, layer7_out)
     """
     #   Use tf.saved_model.loader.load to load the model and weights
-
     vgg_tag = 'vgg16'
-    tf.saved_model.loader.load(sess, [vgg_tag], vgg_path)
-
     vgg_input_tensor_name = 'image_input:0'
     vgg_keep_prob_tensor_name = 'keep_prob:0'
     vgg_layer3_out_tensor_name = 'layer3_out:0'
     vgg_layer4_out_tensor_name = 'layer4_out:0'
     vgg_layer7_out_tensor_name = 'layer7_out:0'
+    tf.saved_model.loader.load(sess, [vgg_tag], vgg_path)
     tf_graph = tf.get_default_graph()
 
-    #Fetch all the above senson name from tensor graph
-    tf_graph.get_tensor_by_name(vgg_input_tensor_name)
-    tf_graph.get_tensor_by_name(vgg_keep_prob_tensor_name)
-    tf_graph.get_tensor_by_name(vgg_layer3_out_tensor_name)
-    tf_graph.get_tensor_by_name(vgg_layer4_out_tensor_name)
-    tf_graph.get_tensor_by_name(vgg_layer7_out_tensor_name)
+    # Fetch all the above senson name from tensor graph
+    input_tensor = tf_graph.get_tensor_by_name(vgg_input_tensor_name)
+    keep_prob_tensor = tf_graph.get_tensor_by_name(vgg_keep_prob_tensor_name)
+    layer3_tensor = tf_graph.get_tensor_by_name(vgg_layer3_out_tensor_name)
+    layer4_tensor = tf_graph.get_tensor_by_name(vgg_layer4_out_tensor_name)
+    layer7_tensor = tf_graph.get_tensor_by_name(vgg_layer7_out_tensor_name)
 
-    return vgg_input_tensor_name, vgg_keep_prob_tensor_name, vgg_layer3_out_tensor_name, vgg_layer4_out_tensor_name,\
-           vgg_layer7_out_tensor_name
+    return input_tensor, keep_prob_tensor, layer3_tensor, layer4_tensor, layer7_tensor
+
+
 tests.test_load_vgg(load_vgg, tf)
 
 
@@ -62,39 +61,41 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
         The first step is to have 1x1 connected layer from encoded vgg layer 7 output
         using convolve 2d function
     '''
-    layer7_1x1 = tf.layers.conv2d(vgg_layer7_out, filter=num_classes, kernel_size=1, padding='same',
-                                  kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
-
-    #To decode unsample layer 8 to match the vgg_layer_4 in order to add skip connection
-    unsampled_layer7 = tf.layers.conv2d_transpose(layer7_1x1, filter=num_classes, kernel_size=4, strides=(2, 2),
-                                                 padding='same',kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
-
-    #Let's convolve vgg layer 4 to 1 x 1 so that we can add it to layer 8
-    layer4_1x1 = tf.layers.conv2d(vgg_layer4_out, filter=num_classes, kernel_size=1, padding='same',
+    layer7_1x1 = tf.layers.conv2d(vgg_layer7_out, num_classes, kernel_size=1, padding='same',
                                   kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
 
-    #add skip connection
-    skip_connection_1 = tf.add(layer4_1x1,unsampled_layer7)
+    # To decode unsample layer 8 to match the vgg_layer_4 in order to add skip connection
+    unsampled_layer7 = tf.layers.conv2d_transpose(layer7_1x1, num_classes, kernel_size=4, strides=(2, 2),
+                                                  padding='same',
+                                                  kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
 
-    #Let's unsample again so we can add it to vgg_layer3_out
-    unsampled_skip1 = tf.layers.conv2d_transpose(skip_connection_1, filter=num_classes, kernel_size=4, strides=(2, 2),
-                                                 padding='same', kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
+    # Let's convolve vgg layer 4 to 1 x 1 so that we can add it to layer 8
+    layer4_1x1 = tf.layers.conv2d(vgg_layer4_out, num_classes, kernel_size=1, padding='same',
+                                  kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+
+    # add skip connection
+    skip_connection_1 = tf.add(layer4_1x1, unsampled_layer7)
+
+    # Let's unsample again so we can add it to vgg_layer3_out
+    unsampled_skip1 = tf.layers.conv2d_transpose(skip_connection_1, num_classes, kernel_size=4, strides=(2, 2),
+                                                 padding='same',
+                                                 kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
 
     # Let's convolve vgg layer 3 output to 1 x 1 so that we can add
-    layer3_1x1 = tf.layers.conv2d(vgg_layer3_out, filter=num_classes, kernel_size=1, padding='same',
+    layer3_1x1 = tf.layers.conv2d(vgg_layer3_out, num_classes, kernel_size=1, padding='same',
                                   kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
 
-    #add skip connection
+    # add skip connection
     skip_connection_2 = tf.add(unsampled_skip1, layer3_1x1)
 
-    #final unsampling
-    unsampled_skip2 = tf.layers.conv2d_transpose(skip_connection_2, filter=num_classes, kernel_size=16, strides=(8, 8),
-                                                 padding='same', kernel_regularizer= tf.contrib.layers.l2_regularizer(1e-3))
-
-
-
+    # final unsampling
+    unsampled_skip2 = tf.layers.conv2d_transpose(skip_connection_2, num_classes, kernel_size=16, strides=(8, 8),
+                                                 padding='same',
+                                                 kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
 
     return unsampled_skip2
+
+
 tests.test_layers(layers)
 
 
@@ -110,10 +111,10 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     ''' In this method lets define the loss and optimizer so that we can train the neural network
         the goal here is to assign each pixel an appropriate class using cross entropy loss
     '''
-    #We need to reshape the output sensor from 4d to 2D
+    # We need to reshape the output sensor from 4d to 2D
     logits = tf.reshape(nn_last_layer, (-1, num_classes))
 
-    #Let's reshape the label as well so that we can compute cross entropy loss
+    # Let's reshape the label as well so that we can compute cross entropy loss
     correct_label = tf.reshape(correct_label, (-1, num_classes))
 
     cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=correct_label))
@@ -127,10 +128,12 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     reg_constant = 1e-3  # Choose an appropriate one.
     loss = cross_entropy_loss + reg_constant * sum(reg_losses)
 
-    #Use Adam optmizier and minimize the loss
+    # Use Adam optmizier and minimize the loss
     train_op = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
 
     return logits, train_op, loss
+
+
 tests.test_optimize(optimize)
 
 
@@ -158,14 +161,16 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
         print("Current Iteration count : {}".format(i))
         total_loss = 0
         for image, label in get_batches_fn(batch_size):
-            loss, _  = sess.run([cross_entropy_loss, train_op],
+            loss, _ = sess.run([cross_entropy_loss, train_op],
                                feed_dict={input_image: image, correct_label: label, keep_prob: 0.5,
                                           learning_rate: 0.001})
             total_loss += loss
 
         print("Loss: = {:.3f}\n".format(loss))
-    
+
     pass
+
+
 tests.test_train_nn(train_nn)
 
 
@@ -203,7 +208,7 @@ def run():
 
         logits, train_op, cross_entropy_loss = optimize(nn_last_layer, correct_label, learning_rate, num_classes)
 
-        epochs = 50
+        epochs = 40
         batch_size = 5
 
         # TODO: Train NN using the train_nn function
